@@ -170,14 +170,14 @@ Makefile (strict C99 hides POSIX declarations like `struct sigaction`).
 ## Repository layout
 
 ```
-prebuilt/
-  python-3.4.10-sco.tar.gz   24 MB install tarball  ← released as asset, see Releases
-
 patches/
   python-3.4.10-sco.patch    5 patches, 4.7 KB unified diff
 
 build.sh                     Native-build script (run on SCO)
 ```
+
+The prebuilt 24 MB tarball isn't committed to the repo (would bloat
+every clone). Grab it from the **[Releases](../../releases)** page.
 
 ## License
 
