@@ -1,0 +1,13 @@
+# 24 MB tarball — distributed as release asset, not committed
+prebuilt/python-3.4.10-sco.tar.gz
+
+# Build artifacts
+Python-*/
+Python-*.tgz
+py_install/
+install34/
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
