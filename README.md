@@ -110,9 +110,11 @@ binaries). You build it on the SCO machine itself.
 
 ### Requirements
 
-- **GCC 3.4.6** at `/asottile/prefix/bin/gcc` (the SCO native 2.95.3 is
-  C89-only and won't build Python 3 — this build needs full C99). If you
-  don't have it, you'll need to build/find a compatible 3.4.x first.
+- **GCC 3.4 or later** somewhere on the SCO box (the SCO-shipped GCC
+  2.95.3 is C89-only and won't build Python 3 — this build needs full
+  C99 support). If you don't already have a newer GCC, you'll need to
+  build or install one first; the build script will refuse to start
+  with 2.x.
 - `/usr/gnu/bin/{gmake,gtar}`, `/usr/bin/patch`
 - **Static OpenSSL 1.0.2** at `/usr/local/lib/{libssl,libcrypto}.a` with
   headers at `/usr/local/include/openssl/`. SCO's stock 0.9.7 is too old
@@ -121,9 +123,17 @@ binaries). You build it on the SCO machine itself.
 
 ### Build
 
+If your C99 GCC is on `PATH` as `gcc`:
+
 ```sh
 cd python34-sco
 ./build.sh
+```
+
+Otherwise tell the script where it lives:
+
+```sh
+GCC=/path/to/your/gcc-3.4 ./build.sh
 ```
 
 Downloads `Python-3.4.10.tgz` from python.org, applies

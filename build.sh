@@ -4,7 +4,9 @@
 # Run this script ON the SCO machine, in a writable directory.
 #
 # Required:
-#   /asottile/prefix/bin/gcc      — GCC 3.4.6 (full C99 support)
+#   GCC 3.4 or later (the SCO native 2.95.3 is C89-only and won't build
+#       Python 3 — full C99 support is needed). Set CC and put it on PATH
+#       before running this script, or override via the CC env var below.
 #   /usr/gnu/bin/{gmake,gtar}, /usr/bin/patch, /bin/{sed,gunzip}
 #   wget or curl, OR drop Python-3.4.10.tgz next to this script
 #   Static OpenSSL 1.0.2 at /usr/local/lib/{libssl,libcrypto}.a
@@ -20,9 +22,28 @@ VERSION=3.4.10
 TARBALL=Python-${VERSION}.tgz
 SRCDIR=Python-${VERSION}
 
-# Prefer GCC 3.4.6 (full C99) over the SCO native 2.95.3 (C89 only)
-PATH=/asottile/prefix/bin:/usr/gnu/bin:/usr/ccs/bin:/usr/bin:/bin
+# If you already have a C99 gcc on PATH, set CC=gcc and skip the next block.
+# Otherwise tell the script where it lives via GCC env var:
+#   GCC=/path/to/your/gcc-3.4 ./build.sh
+if [ -n "$GCC" ]; then
+    CC="$GCC"
+fi
+CC="${CC:-gcc}"
+export CC
+
+PATH=/usr/gnu/bin:/usr/ccs/bin:/usr/bin:/bin
 export PATH
+
+# Sanity check: refuse to start if the chosen gcc is too old (needs C99).
+gcc_ver=`$CC -dumpversion 2>/dev/null`
+case "$gcc_ver" in
+    2.*)
+        echo "ERROR: $CC is GCC $gcc_ver — too old (C89 only)." >&2
+        echo "       Python 3.4 needs GCC 3.4+ for full C99 support." >&2
+        echo "       Set GCC=/path/to/newer/gcc before running." >&2
+        exit 1 ;;
+esac
+echo "Using $CC (GCC $gcc_ver)"
 
 if [ ! -f "$TARBALL" ]; then
     echo "Fetching $TARBALL..."
@@ -51,7 +72,6 @@ else
 fi
 
 echo "Configuring..."
-CC=gcc \
 CFLAGS="-O2 -std=gnu99" \
 CPPFLAGS="-I/usr/local/include -I/usr/local/ssl/include" \
 LDFLAGS="-L/usr/local/lib -L/usr/local/ssl/lib" \
