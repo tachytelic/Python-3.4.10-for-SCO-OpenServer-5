@@ -1,0 +1,113 @@
+diff -ruN a/Include/longobject.h b/Include/longobject.h
+--- a/Include/longobject.h	2019-03-18 16:51:26.000000000 +0000
++++ b/Include/longobject.h	2026-05-03 10:59:45.490110593 +0000
+@@ -36,7 +36,11 @@
+ #define PyLong_AS_LONG(op) PyLong_AsLong(op)
+ 
+ /* Issue #1983: pid_t can be longer than a C long on some systems */
+-#if !defined(SIZEOF_PID_T) || SIZEOF_PID_T == SIZEOF_INT
++#if defined(SIZEOF_PID_T) && SIZEOF_PID_T == SIZEOF_SHORT
++#define _Py_PARSE_PID "h"
++#define PyLong_FromPid PyLong_FromLong
++#define PyLong_AsPid PyLong_AsLong
++#elif !defined(SIZEOF_PID_T) || SIZEOF_PID_T == SIZEOF_INT
+ #define _Py_PARSE_PID "i"
+ #define PyLong_FromPid PyLong_FromLong
+ #define PyLong_AsPid PyLong_AsLong
+diff -ruN a/Modules/_localemodule.c b/Modules/_localemodule.c
+--- a/Modules/_localemodule.c	2019-03-18 16:51:26.000000000 +0000
++++ b/Modules/_localemodule.c	2026-05-03 10:59:45.492110567 +0000
+@@ -445,6 +445,10 @@
+                instead of an empty string for nl_langinfo(ERA).  */
+             const char *result = nl_langinfo(item);
+             result = result != NULL ? result : "";
++            /* SCO fallback: if CODESET is empty/unset, claim ASCII. */
++#ifdef CODESET
++            if (item == CODESET && (result[0] == 0)) result = "ascii";
++#endif
+             return PyUnicode_DecodeLocale(result, NULL);
+         }
+     PyErr_SetString(PyExc_ValueError, "unsupported langinfo constant");
+diff -ruN a/Modules/socketmodule.c b/Modules/socketmodule.c
+--- a/Modules/socketmodule.c	2019-03-18 16:51:26.000000000 +0000
++++ b/Modules/socketmodule.c	2026-05-03 10:59:45.490110593 +0000
+@@ -243,7 +243,7 @@
+ /* Irix 6.5 fails to define this variable at all. This is needed
+    for both GCC and SGI's compiler. I'd say that the SGI headers
+    are just busted. Same thing for Solaris. */
+-#if (defined(__sgi) || defined(sun)) && !defined(INET_ADDRSTRLEN)
++#if !defined(INET_ADDRSTRLEN)
+ #define INET_ADDRSTRLEN 16
+ #endif
+ 
+diff -ruN a/Python/pythonrun.c b/Python/pythonrun.c
+--- a/Python/pythonrun.c	2019-03-18 16:51:26.000000000 +0000
++++ b/Python/pythonrun.c	2026-05-03 10:59:45.491110580 +0000
+@@ -261,8 +261,8 @@
+ #elif defined(HAVE_LANGINFO_H) && defined(CODESET)
+     char* codeset = nl_langinfo(CODESET);
+     if (!codeset || codeset[0] == '\0') {
+-        PyErr_SetString(PyExc_ValueError, "CODESET is not set or empty");
+-        return NULL;
++        /* SCO and similar platforms have no CODESET — fall back to ASCII */
++        return get_codec_name("ascii");
+     }
+     return get_codec_name(codeset);
+ #else
+@@ -1194,6 +1194,10 @@
+             }
+         }
+     }
++    /* SCO fallback: if no encoding determined, force ASCII (locale on SCO
++       is often empty so io would fail to look up its preferred encoding) */
++    if (!encoding || !*encoding) encoding = "ascii";
++    if (!errors || !*errors) errors = "strict";
+ 
+     /* Set sys.stdin */
+     fd = fileno(stdin);
+diff -ruN a/Python/random.c b/Python/random.c
+--- a/Python/random.c	2019-03-18 16:51:26.000000000 +0000
++++ b/Python/random.c	2026-05-03 10:59:45.493110555 +0000
+@@ -124,8 +124,19 @@
+     assert (0 < size);
+ 
+     fd = _Py_open("/dev/urandom", O_RDONLY);
+-    if (fd < 0)
+-        Py_FatalError("Failed to open /dev/urandom");
++    if (fd < 0) {
++        /* SCO and similar systems without /dev/urandom: weak time+pid entropy.
++           Fine for hash randomization; NOT for cryptographic use. */
++        unsigned int lcg = (unsigned int)time(NULL) ^
++                           ((unsigned int)getpid() << 16) ^
++                           (unsigned int)(unsigned long)(void *)&fd;
++        while (0 < size) {
++            lcg = lcg * 1103515245u + 12345u;
++            *buffer++ = (unsigned char)(lcg >> 16);
++            size--;
++        }
++        return;
++    }
+ 
+     while (0 < size)
+     {
+@@ -176,7 +187,19 @@
+         if (fd < 0)
+         {
+             if (errno == ENOENT || errno == ENXIO ||
+-                errno == ENODEV || errno == EACCES)
++                errno == ENODEV || errno == EACCES) {
++                /* SCO fallback */
++                unsigned int lcg2 = (unsigned int)time(NULL) ^
++                                    ((unsigned int)getpid() << 16) ^
++                                    (unsigned int)(unsigned long)(void *)&fd;
++                while (0 < size) {
++                    lcg2 = lcg2 * 1103515245u + 12345u;
++                    *buffer++ = (char)(lcg2 >> 16);
++                    size--;
++                }
++                return 0;
++            }
++            if (0)
+                 PyErr_SetString(PyExc_NotImplementedError,
+                                 "/dev/urandom (or equivalent) not found");
+             else

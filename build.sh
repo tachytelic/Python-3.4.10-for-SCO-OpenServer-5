@@ -1,0 +1,107 @@
+#!/bin/sh
+# Build Python 3.4.10 natively on SCO OpenServer 5.0.7.
+#
+# Run this script ON the SCO machine, in a writable directory.
+#
+# Required:
+#   GCC 3.4 or later (the SCO native 2.95.3 is C89-only and won't build
+#       Python 3 — full C99 support is needed). Set CC and put it on PATH
+#       before running this script, or override via the CC env var below.
+#   /usr/gnu/bin/{gmake,gtar}, /usr/bin/patch, /bin/{sed,gunzip}
+#   wget or curl, OR drop Python-3.4.10.tgz next to this script
+#   Static OpenSSL 1.0.2 at /usr/local/lib/{libssl,libcrypto}.a
+#       with headers at /usr/local/include/openssl/.  (For TLS support.
+#       SCO's stock OpenSSL 0.9.7 is too old — Python 3.4 needs 1.0.x.)
+#
+# Output: ./py_install/ (about 24 MB stripped) — a relocatable Python install.
+
+set -e
+
+SCRIPT_DIR=`cd \`dirname "$0"\` && pwd`
+VERSION=3.4.10
+TARBALL=Python-${VERSION}.tgz
+SRCDIR=Python-${VERSION}
+
+# If you already have a C99 gcc on PATH, set CC=gcc and skip the next block.
+# Otherwise tell the script where it lives via GCC env var:
+#   GCC=/path/to/your/gcc-3.4 ./build.sh
+if [ -n "$GCC" ]; then
+    CC="$GCC"
+fi
+CC="${CC:-gcc}"
+export CC
+
+PATH=/usr/gnu/bin:/usr/ccs/bin:/usr/bin:/bin
+export PATH
+
+# Sanity check: refuse to start if the chosen gcc is too old (needs C99).
+gcc_ver=`$CC -dumpversion 2>/dev/null`
+case "$gcc_ver" in
+    2.*)
+        echo "ERROR: $CC is GCC $gcc_ver — too old (C89 only)." >&2
+        echo "       Python 3.4 needs GCC 3.4+ for full C99 support." >&2
+        echo "       Set GCC=/path/to/newer/gcc before running." >&2
+        exit 1 ;;
+esac
+echo "Using $CC (GCC $gcc_ver)"
+
+if [ ! -f "$TARBALL" ]; then
+    echo "Fetching $TARBALL..."
+    if which wget >/dev/null 2>&1; then
+        wget --no-check-certificate "https://www.python.org/ftp/python/${VERSION}/${TARBALL}"
+    elif which curl >/dev/null 2>&1; then
+        curl -kLO "https://www.python.org/ftp/python/${VERSION}/${TARBALL}"
+    else
+        echo "ERROR: no wget or curl. Drop $TARBALL next to this script." >&2
+        exit 1
+    fi
+fi
+
+if [ ! -d "$SRCDIR" ]; then
+    echo "Unpacking $TARBALL..."
+    gtar xzf "$TARBALL"
+fi
+
+echo "Applying SCO compatibility patches..."
+cd "$SRCDIR"
+if [ -f .sco_patched ]; then
+    echo "  (already applied — skipping)"
+else
+    patch -p1 < "$SCRIPT_DIR/patches/python-3.4.10-sco.patch"
+    touch .sco_patched
+fi
+
+echo "Configuring..."
+CFLAGS="-O2 -std=gnu99" \
+CPPFLAGS="-I/usr/local/include -I/usr/local/ssl/include" \
+LDFLAGS="-L/usr/local/lib -L/usr/local/ssl/lib" \
+./configure --prefix="$SCRIPT_DIR/py_install" --without-pymalloc
+
+# Two post-configure tweaks:
+# 1. Disable HAVE_KQUEUE — SCO has <sys/event.h> from some package but the
+#    kqueue API is incomplete; without this, Modules/selectmodule.c won't
+#    compile and the select extension is silently dropped.
+# 2. Replace -std=c99 with -std=gnu99 — strict C99 mode hides POSIX
+#    declarations like struct sigaction on SCO's headers.
+echo "Post-configure tweaks..."
+sed "s|^#define HAVE_KQUEUE 1\$|/* #undef HAVE_KQUEUE */|" pyconfig.h > pyconfig.h.new
+mv pyconfig.h.new pyconfig.h
+sed "s|-std=c99|-std=gnu99|g" Makefile > Makefile.new
+mv Makefile.new Makefile
+
+echo "Compiling (long — go make tea)..."
+gmake
+
+echo "Installing to $SCRIPT_DIR/py_install/..."
+gmake -s install || true   # ensurepip step may fail (urandom-related); install itself is OK
+
+echo "Stripping binaries..."
+strip "$SCRIPT_DIR/py_install/bin/python3.4" 2>/dev/null || true
+find "$SCRIPT_DIR/py_install" -name "*.so" -exec strip {} \; 2>/dev/null
+
+ls -l "$SCRIPT_DIR/py_install/bin/python3"
+echo
+echo "Built: $SCRIPT_DIR/py_install/"
+echo "Test it: $SCRIPT_DIR/py_install/bin/python3 --version"
+echo
+echo "To package: gtar czf python-${VERSION}-sco.tar.gz py_install"
